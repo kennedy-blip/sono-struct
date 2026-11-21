@@ -121,6 +121,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { void refreshCounts(); }, [refreshCounts]);
 
+  // Probe the cloud ledger on boot so the status strip reflects reality
+  // before the user ever presses "Sync queue".
+  const probeCloud = useCallback(async () => {
+    if (!cloudEnabled()) {
+      setCloud({ configured: false, reachable: false, remoteRows: 0, lastSyncedAt: null });
+      return;
+    }
+    const status = await cloudStatus();
+    setCloud({ configured: true, ...status });
+  }, []);
+
+  useEffect(() => { void probeCloud(); }, [probeCloud]);
+  useEffect(() => {
+    const on = () => { void probeCloud(); };
+    window.addEventListener('online', on);
+    return () => window.removeEventListener('online', on);
+  }, [probeCloud]);
+
   useEffect(() => {
     const on = () => { setOnline(true); setToastMsg('Back online — offline queue ready to sync.'); };
     const off = () => { setOnline(false); setToastMsg('Offline mode — all diagnostics still available.'); };
