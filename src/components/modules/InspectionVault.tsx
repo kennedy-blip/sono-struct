@@ -31,7 +31,7 @@ const PROPERTIES = [
 ];
 
 export default function InspectionVault() {
-  const { role, counts, refreshCounts, syncNow, syncing, online, toast, locked, setLocked, property, setProperty } = useApp();
+  const { role, counts, refreshCounts, syncNow, syncing, online, toast, locked, setLocked, property, setProperty, cloud } = useApp();
   const admin = meetsTier(role, 'director');
   const [tab, setTab] = useState<Tab>('checklist');
   const [items, setItems] = useState<Record<string, CheckItemRecord>>({});
@@ -222,6 +222,29 @@ export default function InspectionVault() {
             </div>
             <div className="dim" style={{ fontSize: 11, marginTop: 10, lineHeight: 1.55 }}>
               Every save (scan, leak, room, checklist change, delete) is appended here first. Nothing leaves the device until you drain the queue while online; failures stay queued and retry on the next drain.
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginTop: 14 }}>
+              <Metric
+                label="Transport"
+                value={cloud.configured ? 'SUPABASE' : 'LOCAL ONLY'}
+                tone={cloud.configured ? 'accent' : 'warn'}
+                mono={false}
+                sub={cloud.configured ? 'PostgREST · anon key' : 'add VITE_SUPABASE_URL + ANON_KEY to enable'}
+              />
+              <Metric
+                label="Cloud reachable"
+                value={cloud.configured ? (cloud.reachable ? 'YES' : 'NO') : 'N/A'}
+                tone={cloud.reachable ? 'ok' : cloud.configured ? 'bad' : 'warn'}
+                mono={false}
+                sub={cloud.error ? cloud.error.slice(0, 46) : `${cloud.remoteRows} rows this device`}
+              />
+              <Metric
+                label="Last remote row"
+                value={cloud.lastSyncedAt ? new Date(cloud.lastSyncedAt).toLocaleTimeString() : '—'}
+                tone="accent"
+                sub={cloud.lastSyncedAt ? new Date(cloud.lastSyncedAt).toLocaleDateString() : 'no uploads yet'}
+                mono={false}
+              />
             </div>
           </GlassCard>
           <div style={{ display: 'grid', gap: 8 }}>

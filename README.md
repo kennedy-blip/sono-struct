@@ -28,3 +28,31 @@ npm run build    # tsc -b && vite build
 `public/releases/sonostruct-release.apk` when present, with a signed-manifest fallback.
 `.github/workflows/build-and-bundle-apk.yml` builds the web bundle, syncs Capacitor,
 compiles the release APK with Gradle, and publishes it to `public/releases/`.
+
+## Cloud sync (optional Supabase ledger)
+
+The vault is local-first. To mirror the mutation queue to Supabase:
+
+1. Run `supabase/migrations/0001_sonostruct_mutations.sql` (or `supabase db push`).
+2. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` (see `.env.example`).
+
+With keys present, "Sync now" upserts each queued mutation to
+`public.sonostruct_mutations` with `on_conflict=client_id` + `ignore-duplicates`,
+so retries after a dropped uplink are idempotent. Without keys the app reports
+`LOCAL ONLY` and commits the drain to IndexedDB exactly as before.
+
+RLS: anon may INSERT (device_id longer than 8 chars) and SELECT. No UPDATE or
+DELETE policies exist — the ledger is an append-only audit trail.
+
+## Deploy
+
+Vercel project `sono-struct` (framework: vite, build `npm run build`, output `dist`).
+`vercel.json` adds an SPA rewrite that preserves `/assets` and `/releases`, so the
+APK artifact is served as a static file rather than the HTML shell.
+
+## Verification
+
+```bash
+npm run build       # tsc -b && vite build — zero errors required
+npm run test:smoke  # headless DOM suite: 16 assertions across all 5 modules
+```

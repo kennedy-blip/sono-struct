@@ -5,6 +5,7 @@
  */
 import Dexie, { type Table } from 'dexie';
 import type { CheckItemRecord, LeakRecord, RoomRecord, SyncMutation, WallScanRecord } from '../types';
+import { cloudConfig, deviceId, mutationClientId, pushMutations, type CloudMutation } from './cloudSync';
 
 class SonoStructDB extends Dexie {
   scans!: Table<WallScanRecord, number>;
@@ -75,13 +76,49 @@ export async function pendingCount(): Promise<number> {
   return db.queue.where('synced').equals(0).count();
 }
 
-/** Drains the queue. Offline ⇒ returns before touching anything. */
-export async function drainQueue(online: boolean): Promise<{ synced: number; total: number }> {
+export interface DrainResult {
+  synced: number;
+  total: number;
+  /** 'cloud' = acknowledged by Supabase, 'local' = committed locally only. */
+  channel: 'cloud' | 'local';
+  error?: string;
+}
+
+/**
+ * Drains the queue. Offline ⇒ returns before touching anything.
+ * When Supabase is configured the batch is pushed first and only acknowledged
+ * rows are marked synced, so a failed uplink leaves everything queued for retry.
+ */
+export async function drainQueue(online: boolean): Promise<DrainResult> {
   const pending = await db.queue.where('synced').equals(0).toArray();
-  if (!online || pending.length === 0) return { synced: 0, total: pending.length };
-  await new Promise((r) => setTimeout(r, 420)); // simulated network round-trip
+  if (!online || pending.length === 0) return { synced: 0, total: pending.length, channel: 'local' };
+
+  const cfg = cloudConfig();
+  if (cfg) {
+    const device = deviceId();
+    const rows: CloudMutation[] = pending.map((p) => ({
+      client_id: mutationClientId(device, p.createdAt, p.entity, p.action),
+      device_id: device,
+      entity: p.entity,
+      action: p.action,
+      payload: safeParse(p.payload),
+      created_at: new Date(p.createdAt).toISOString(),
+    }));
+    const result = await pushMutations(rows);
+    if (!result.ok) {
+      return { synced: 0, total: pending.length, channel: 'cloud', error: result.error };
+    }
+    await db.queue.bulkUpdate(pending.map((p) => ({ key: p.id as number, changes: { synced: 1 as const } })));
+    return { synced: pending.length, total: pending.length, channel: 'cloud' };
+  }
+
+  await new Promise((r) => setTimeout(r, 320)); // local commit beat
   await db.queue.bulkUpdate(pending.map((p) => ({ key: p.id as number, changes: { synced: 1 as const } })));
-  return { synced: pending.length, total: pending.length };
+  return { synced: pending.length, total: pending.length, channel: 'local' };
+}
+
+function safeParse(raw: string): unknown {
+  try { return JSON.parse(raw) as unknown; } catch { return { raw }; }
 }
 
 export async function vaultCounts(): Promise<{ scans: number; leaks: number; rooms: number; checks: number; pending: number }> {

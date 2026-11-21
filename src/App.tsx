@@ -36,7 +36,7 @@ function ModuleBody({ id }: { id: keyof typeof MODULE_TITLES }) {
 }
 
 function StatusStrip() {
-  const { counts, online, syncNow, syncing, sensors } = useApp();
+  const { counts, online, syncNow, syncing, sensors, cloud } = useApp();
   const active = Object.values(sensors).filter((s) => s === 'ACTIVE').length;
   return (
     <div className="glass" style={{ display: 'flex', gap: 14, padding: '9px 14px', borderRadius: 14, alignItems: 'center', flexWrap: 'wrap', fontSize: 10 }}>
@@ -44,6 +44,9 @@ function StatusStrip() {
       <span className="mono" style={{ color: online ? 'var(--accent-2)' : 'var(--warn)' }}>{online ? '● ONLINE' : '● OFFLINE-FIRST'}</span>
       <span className="mono dim">sensors {active}/4 active</span>
       <span className="mono dim">queue {counts.pending}</span>
+      <span className="mono dim" title={cloud.configured ? 'Supabase cloud ledger' : 'local IndexedDB only'}>
+        sync {cloud.configured ? (cloud.reachable ? 'cloud ✓' : 'cloud ✕') : 'local'}
+      </span>
       <span className="mono dim">vault {counts.scans + counts.leaks + counts.rooms} records</span>
       <button className="btn" onClick={() => void syncNow()} disabled={syncing} style={{ marginLeft: 'auto', padding: '4px 9px', fontSize: 10 }}>
         {syncing ? 'Syncing…' : 'Sync queue'}

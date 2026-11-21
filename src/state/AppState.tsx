@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ModuleId, Role, SensorKey, SensorState, ThemeId, ViewMode } from '../types';
 import { drainQueue, pendingCount, vaultCounts } from '../services/db';
+import { cloudEnabled, cloudStatus, type CloudStatus } from '../services/cloudSync';
 
 export interface VaultCounts { scans: number; leaks: number; rooms: number; checks: number; pending: number }
 
@@ -23,6 +24,7 @@ interface AppCtx {
   refreshCounts: () => Promise<void>;
   syncNow: () => Promise<{ synced: number; total: number }>;
   syncing: boolean;
+  cloud: CloudStatus & { configured: boolean };
   apkOpen: boolean;
   setApkOpen: (v: boolean) => void;
   privOpen: boolean;
@@ -61,6 +63,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [online, setOnline] = useState(navigator.onLine);
   const [counts, setCounts] = useState<VaultCounts>({ scans: 0, leaks: 0, rooms: 0, checks: 0, pending: 0 });
   const [syncing, setSyncing] = useState(false);
+  const [cloud, setCloud] = useState<CloudStatus & { configured: boolean }>({ configured: cloudEnabled(), reachable: false, remoteRows: 0, lastSyncedAt: null });
   const [apkOpen, setApkOpen] = useState(false);
   const [privOpen, setPrivOpen] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -94,8 +97,15 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setSyncing(true);
     const res = await drainQueue(navigator.onLine);
     await refreshCounts();
+    if (cloudEnabled() && navigator.onLine) {
+      const status = await cloudStatus();
+      setCloud({ configured: true, ...status });
+    }
     setSyncing(false);
-    setToastMsg(res.synced > 0 ? `Synced ${res.synced} mutation${res.synced === 1 ? '' : 's'} to cloud ledger.` : navigator.onLine ? 'Queue empty — vault already in sync.' : 'Offline — mutations held in local queue.');
+    if (!navigator.onLine) setToastMsg('Offline — mutations held in the local queue.');
+    else if (res.error) setToastMsg(`Cloud upload rejected (${res.error.slice(0, 90)}) — ${res.total} mutation(s) kept queued.`);
+    else if (res.synced > 0) setToastMsg(`Synced ${res.synced} mutation${res.synced === 1 ? '' : 's'} to the ${res.channel === 'cloud' ? 'Supabase' : 'local'} ledger.`);
+    else setToastMsg('Queue empty — vault already in sync.');
     return res;
   }, [refreshCounts]);
 
@@ -159,10 +169,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     theme, setTheme, role, setRole, module, setModule, view, setView,
     sensors, setSensor, hint, pulse,
     setPulse: (p) => setPulse(p),
-    online, counts, refreshCounts, syncNow, syncing,
+    online, counts, refreshCounts, syncNow, syncing, cloud,
     apkOpen, setApkOpen, privOpen, setPrivOpen,
     locked, setLocked, property, setProperty, toast, toastMsg,
-  }), [theme, setTheme, role, setRole, module, view, setView, sensors, setSensor, hint, pulse, online, counts, refreshCounts, syncNow, syncing, apkOpen, privOpen, locked, property, setProperty, toast, toastMsg]);
+  }), [theme, setTheme, role, setRole, module, view, setView, sensors, setSensor, hint, pulse, online, counts, refreshCounts, syncNow, syncing, cloud, apkOpen, privOpen, locked, property, setProperty, toast, toastMsg]);
 
   // expose setter for hint via a custom event-free approach: modules use local hints
   (value as unknown as { setHint?: (s: string) => void }).setHint = setHint;
