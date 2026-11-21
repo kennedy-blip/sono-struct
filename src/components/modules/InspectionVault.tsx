@@ -233,8 +233,8 @@ export default function InspectionVault() {
               />
               <Metric
                 label="Cloud reachable"
-                value={cloud.configured ? (cloud.reachable ? 'YES' : 'NO') : 'N/A'}
-                tone={cloud.reachable ? 'ok' : cloud.configured ? 'bad' : 'warn'}
+                value={cloud.phase === 'local' ? 'N/A' : cloud.phase === 'checking' ? 'CHECKING' : cloud.phase === 'ok' ? 'YES' : 'NO'}
+                tone={cloud.phase === 'ok' ? 'ok' : cloud.phase === 'error' ? 'bad' : 'warn'}
                 mono={false}
                 sub={cloud.error ? cloud.error.slice(0, 46) : `${cloud.remoteRows} rows this device`}
               />
