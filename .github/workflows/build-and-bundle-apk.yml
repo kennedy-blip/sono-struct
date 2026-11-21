@@ -1,0 +1,24 @@
+name: Build & Bundle APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm run build
+      - run: npx cap sync android
+      - uses: actions/setup-java@v4
+        with: { distribution: 'temurin', java-version: '17' }
+      - run: cd android && ./gradlew assembleRelease --no-daemon
+      - run: |
+          mkdir -p public/releases
+          cp android/app/build/outputs/apk/release/app-release.apk public/releases/sonostruct-release.apk
+          sha256sum public/releases/sonostruct-release.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: sonostruct-apk, path: public/releases/sonostruct-release.apk }
