@@ -72,6 +72,7 @@ export const LEAK_SCENARIOS: LeakScenario[] = [
 
 export class LeakStethoscope {
   private src: AudioBufferSourceNode | null = null;
+  private live: { stream: MediaStream; source: MediaStreamAudioSourceNode } | null = null;
   private tone: OscillatorNode | null = null;
   private toneGain: GainNode | null = null;
   private hp: BiquadFilterNode | null = null;
@@ -149,6 +150,62 @@ export class LeakStethoscope {
     return this.analyser;
   }
 
+  /**
+   * Live listen-through-the-wall: routes a real microphone stream through the
+   * identical HP → LP → notch chain and out to the speakers, so the operator
+   * hears amplified 350–2800 Hz cavitation while watching the analyser.
+   */
+  startLive(stream: MediaStream, opts: { bandLimit?: boolean; notch?: boolean } = {}, gainScale = 1): AnalyserNode {
+    const c = getCtx();
+    this.stop();
+    this.analyser = c.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.analyser.smoothingTimeConstant = 0.7;
+
+    const bandLimit = opts.bandLimit ?? true;
+    this.hp = c.createBiquadFilter();
+    this.hp.type = 'highpass';
+    this.hp.frequency.value = bandLimit ? 350 : 20;
+    this.hp.Q.value = 0.7;
+
+    this.lp = c.createBiquadFilter();
+    this.lp.type = 'lowpass';
+    this.lp.frequency.value = bandLimit ? 2800 : 16000;
+    this.lp.Q.value = 0.7;
+
+    this.notch = [50, 60].map((f) => {
+      const n = c.createBiquadFilter();
+      n.type = (opts.notch ?? true) ? 'notch' : 'allpass';
+      n.frequency.value = f;
+      n.Q.value = 26;
+      return n;
+    });
+
+    this.shaper = c.createBiquadFilter();
+    this.shaper.type = 'peaking';
+    this.shaper.frequency.value = 1200;
+    this.shaper.Q.value = 0.9;
+    this.shaper.gain.value = 7;
+
+    this.gain = c.createGain();
+    this.gain.gain.value = 1.1 * gainScale;
+
+    const source = c.createMediaStreamSource(stream);
+    let node: AudioNode = this.gain;
+    source.connect(this.gain);
+    this.gain.connect(this.shaper);
+    node = this.shaper;
+    for (const n of this.notch) { node.connect(n); node = n; }
+    node.connect(this.hp);
+    this.hp.connect(this.lp);
+    this.lp.connect(this.analyser);
+    this.analyser.connect(c.destination);
+
+    this.live = { stream, source };
+    this.running = true;
+    return this.analyser;
+  }
+
   setGain(scale: number): void {
     if (this.gain) this.gain.gain.setTargetAtTime(Math.max(0.0001, scale), getCtx().currentTime, 0.08);
   }
@@ -159,6 +216,11 @@ export class LeakStethoscope {
     try { this.src?.stop(); } catch { /* noop */ }
     try { this.tone?.stop(); } catch { /* noop */ }
     try { this.analyser?.disconnect(); } catch { /* noop */ }
+    if (this.live) {
+      try { this.live.source.disconnect(); } catch { /* noop */ }
+      this.live.stream.getTracks().forEach((t) => t.stop());
+      this.live = null;
+    }
     this.src = null; this.tone = null; this.gain = null; this.analyser = null; this.running = false;
   }
 }

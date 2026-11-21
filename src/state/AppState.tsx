@@ -127,7 +127,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.style.setProperty('--my', `${e.clientY}px`);
     };
     window.addEventListener('pointermove', move);
-    return () => window.removeEventListener('pointermove', move);
+
+    // Mobile / APK: sweep the specular highlight with device tilt instead of a cursor.
+    let lastTs = 0;
+    const tilt = (e: DeviceOrientationEvent) => {
+      const now = performance.now();
+      if (now - lastTs < 40) return; // ~25 fps of CSS writes is plenty
+      lastTs = now;
+      const g = Number.isFinite(e.gamma) ? (e.gamma as number) : 0;
+      const b = Number.isFinite(e.beta) ? (e.beta as number) : 0;
+      const x = Math.max(0, Math.min(1, 0.5 + g / 90)) * window.innerWidth;
+      const y = Math.max(0, Math.min(1, 0.35 + b / 180)) * window.innerHeight;
+      document.documentElement.style.setProperty('--mx', `${x}px`);
+      document.documentElement.style.setProperty('--my', `${y}px`);
+    };
+    window.addEventListener('deviceorientation', tilt);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('deviceorientation', tilt);
+    };
   }, []);
 
   useEffect(() => {

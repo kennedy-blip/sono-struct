@@ -437,6 +437,10 @@ function SpectrumBars({ data }: { data: Float32Array }) {
 function DensityRadar({ x, reading, scans }: { x: number; reading: EchoReading | null; scans: { x: number; kind: MaterialKind }[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const phase = useRef(0);
+  // Live values live in refs so the rAF loop is started once instead of
+  // being torn down on every pointer move / state update.
+  const live = useRef({ x, reading, scans });
+  live.current = { x, reading, scans };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -484,8 +488,10 @@ function DensityRadar({ x, reading, scans }: { x: number; reading: EchoReading |
       ctx.fillStyle = beam;
       ctx.fill();
 
+      const { x: cx, reading: rd, scans: pts } = live.current;
+
       // scanned density blobs
-      scans.forEach((s) => {
+      pts.forEach((s) => {
         if (!s) return;
         const nx = s.x / SPAN;
         const px = w * (0.08 + nx * 0.84);
@@ -502,16 +508,16 @@ function DensityRadar({ x, reading, scans }: { x: number; reading: EchoReading |
       });
 
       // live sensor pin
-      const px = w * (0.08 + (x / SPAN) * 0.84);
+      const px = w * (0.08 + (cx / SPAN) * 0.84);
       const py = h * 0.62;
       const pulse = 10 + Math.sin(phase.current * 3) * 4;
       ctx.beginPath();
-      ctx.strokeStyle = reading?.severity === 'danger' ? '#f43f5e' : '#22d3ee';
+      ctx.strokeStyle = rd?.severity === 'danger' ? '#f43f5e' : '#22d3ee';
       ctx.lineWidth = 2;
       ctx.arc(px, py, pulse, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
-      ctx.fillStyle = reading?.severity === 'danger' ? '#f43f5e' : '#22d3ee';
+      ctx.fillStyle = rd?.severity === 'danger' ? '#f43f5e' : '#22d3ee';
       ctx.arc(px, py, 3.4, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
@@ -526,7 +532,7 @@ function DensityRadar({ x, reading, scans }: { x: number; reading: EchoReading |
     };
     raf = requestAnimationFrame(draw);
     return () => { cancelAnimationFrame(raf); window.removeEventListener('resize', resize); };
-  }, [x, reading, scans]);
+  }, []);
 
   return <canvas ref={canvasRef} style={{ width: '100%', height: 210, display: 'block' }} />;
 }

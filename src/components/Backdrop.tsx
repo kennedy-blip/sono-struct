@@ -73,12 +73,40 @@ export function MeshBackdrop() {
 }
 
 export function Chrome() {
+  const { theme } = useApp();
+  // Eco mode paints a static underlay: no blur filter, no rAF blob drift.
+  if (theme === 'eco') {
+    return (
+      <>
+        <div
+          aria-hidden
+          style={{
+            position: 'fixed', inset: 0, zIndex: 0,
+            background:
+              'radial-gradient(60% 45% at 18% 12%, color-mix(in srgb, var(--blob-a) 42%, transparent), transparent 70%),' +
+              'radial-gradient(55% 40% at 82% 22%, color-mix(in srgb, var(--blob-b) 38%, transparent), transparent 70%),' +
+              'radial-gradient(65% 50% at 50% 92%, color-mix(in srgb, var(--blob-c) 30%, transparent), transparent 72%),' +
+              'var(--bg-0)',
+          }}
+        />
+        <div className="grid-overlay" />
+        <ChromeDefs />
+      </>
+    );
+  }
   return (
     <>
       <MeshBackdrop />
       <div className="grid-overlay" />
       <div className="specular" />
       <div className="grain" />
+      <ChromeDefs />
+    </>
+  );
+}
+
+function ChromeDefs() {
+  return (
       <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden>
         <defs>
           <filter id="gooey">
@@ -95,7 +123,6 @@ export function Chrome() {
           </filter>
         </defs>
       </svg>
-    </>
   );
 }
 

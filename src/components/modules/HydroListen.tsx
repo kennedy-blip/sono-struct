@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Droplets, Gauge, Headphones, Save, ShieldAlert, Thermometer, Waves } from 'lucide-react';
+import { Droplets, Gauge, Headphones, Mic, Save, ShieldAlert, Square, Thermometer, Waves } from 'lucide-react';
 import { GlassCard, Locked, Metric, SectionTitle, Toggle } from '../ui';
 import { useApp, useHint, meetsTier } from '../../state/AppState';
 import { LEAK_SCENARIOS, LeakStethoscope, waterWaste, type LeakScenario } from '../../services/hydroLeakEngine';
 import { saveLeak } from '../../services/db';
 import { micDebugLine } from '../../services/format';
+import { openMic } from '../../services/audio';
 
 export default function HydroListen() {
   const { role, toast, refreshCounts, setPrivOpen, property } = useApp();
@@ -21,6 +22,9 @@ export default function HydroListen() {
   const [bandLevel, setBandLevel] = useState(-100);
   const scope = useRef<LeakStethoscope | null>(null);
   const raf = useRef(0);
+  const [liveOn, setLiveOn] = useState(false);
+  const [liveState, setLiveState] = useState<'idle' | 'requesting' | 'live' | 'blocked'>('idle');
+  const liveStream = useRef<MediaStream | null>(null);
 
   const [flowLpm, setFlowLpm] = useState(1.9);
   const [hours, setHours] = useState(24);
@@ -40,21 +44,16 @@ export default function HydroListen() {
     setPlaying(false);
   }, []);
 
-  const play = useCallback((sc: LeakScenario) => {
-    cancelAnimationFrame(raf.current);
-    const st = scope.current ?? new LeakStethoscope();
-    scope.current = st;
-    const an = st.start(sc, magnify, { bandLimit: restrictBand, notch: notchOn });
-    setPlaying(true);
-    setHint(`Listening: ${sc.label}. The chain keeps 350–2800 Hz and notches 50/60 Hz.`);
+  /** Shared analyser polling loop for both simulator and live-mic paths. */
+  const trackAnalyser = useCallback((an: AnalyserNode) => {
     const freq = new Float32Array(an.frequencyBinCount);
+    const sr = an.context.sampleRate;
+    const fft = an.fftSize;
+    const b0 = Math.floor((350 * fft) / sr);
+    const b1 = Math.floor((2800 * fft) / sr);
     const loop = () => {
       an.getFloatFrequencyData(freq);
       setSpectrum(new Float32Array(freq));
-      const sr = an.context.sampleRate;
-      const fft = an.fftSize;
-      const b0 = Math.floor((350 * fft) / sr);
-      const b1 = Math.floor((2800 * fft) / sr);
       let mx = -160, at = 0;
       for (let i = b0; i <= b1; i++) if (freq[i] > mx) { mx = freq[i]; at = (i * sr) / fft; }
       setBandLevel(mx);
@@ -62,14 +61,62 @@ export default function HydroListen() {
       raf.current = requestAnimationFrame(loop);
     };
     raf.current = requestAnimationFrame(loop);
-  }, [magnify, setHint, restrictBand, notchOn]);
+  }, []);
+
+  const play = useCallback((sc: LeakScenario) => {
+    cancelAnimationFrame(raf.current);
+    const st = scope.current ?? new LeakStethoscope();
+    scope.current = st;
+    const an = st.start(sc, magnify, { bandLimit: restrictBand, notch: notchOn });
+    setPlaying(true);
+    setHint(`Listening: ${sc.label}. The chain keeps 350–2800 Hz and notches 50/60 Hz.`);
+    trackAnalyser(an);
+  }, [magnify, setHint, restrictBand, notchOn, trackAnalyser]);
+
+  const startLive = useCallback(async () => {
+    setLiveState('requesting');
+    try {
+      const handle = await openMic(2048, 0.6);
+      liveStream.current = handle.stream;
+      cancelAnimationFrame(raf.current);
+      const st = scope.current ?? new LeakStethoscope();
+      scope.current = st;
+      const an = st.startLive(handle.stream, { bandLimit: restrictBand, notch: notchOn }, magnify);
+      setLiveOn(true);
+      setLiveState('live');
+      setPlaying(false);
+      setHint('Hold the phone flat against the wall or floor. Headphones recommended — the mic is amplified through the same filter chain.');
+      trackAnalyser(an);
+    } catch {
+      setLiveState('blocked');
+      toast('Microphone blocked — the four plumbing simulators still work.');
+    }
+  }, [magnify, restrictBand, notchOn, setHint, toast, trackAnalyser]);
+
+  const stopLive = useCallback(() => {
+    cancelAnimationFrame(raf.current);
+    scope.current?.stop();
+    liveStream.current?.getTracks().forEach((t) => t.stop());
+    liveStream.current = null;
+    setLiveOn(false);
+    setLiveState('idle');
+    setSpectrum(new Float32Array(0));
+    setPeak(0);
+    setBandLevel(-100);
+  }, []);
 
   useEffect(() => { scope.current?.setGain(magnify); }, [magnify]);
   useEffect(() => {
+    if (liveOn && liveStream.current) {
+      cancelAnimationFrame(raf.current);
+      const an = scope.current?.startLive(liveStream.current, { bandLimit: restrictBand, notch: notchOn }, magnify);
+      if (an) trackAnalyser(an);
+      return;
+    }
     if (playing) play(scenario);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restrictBand, notchOn]);
-  useEffect(() => () => { cancelAnimationFrame(raf.current); scope.current?.stop(); }, []);
+  useEffect(() => () => { cancelAnimationFrame(raf.current); scope.current?.stop(); liveStream.current?.getTracks().forEach((t) => t.stop()); }, []);
 
   useEffect(() => {
     if (scenario) setFlowLpm(scenario.flowLpm);
@@ -102,11 +149,34 @@ export default function HydroListen() {
         <SectionTitle
           eyebrow="Module 02 · Hydro-Listen Lab"
           title="Sub-Surface Leak Stethoscope"
-          right={<span className="chip"><Headphones size={11} /> 350–2800 Hz BPF</span>}
+          right={
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <span className="chip"><Headphones size={11} /> 350–2800 Hz BPF</span>
+              <button
+                className={`btn ${liveOn ? 'btn-primary' : ''}`}
+                onClick={() => (liveOn ? stopLive() : void startLive())}
+                disabled={liveState === 'requesting'}
+              >
+                {liveOn ? <Square size={13} /> : <Mic size={13} />}
+                {liveState === 'requesting' ? 'Opening mic…' : liveOn ? 'Stop live listen' : 'Live listen through wall'}
+              </button>
+            </div>
+          }
         />
         <div className="dim" style={{ fontSize: 12, lineHeight: 1.55, maxWidth: 780 }}>
           A real <b>BiquadFilterNode</b> chain isolates turbulent cavitation: high-pass at 350 Hz rejects footfall and HVAC rumble, low-pass at 2.8 kHz rejects hiss from air leaks, and 50/60 Hz notches kill electrical hum. Inject a plumbing signature below, or switch to live mic to listen through a wall.
         </div>
+        {liveOn && (
+          <div className="glass" style={{ marginTop: 12, padding: '9px 12px', borderRadius: 12, display: 'flex', gap: 9, alignItems: 'center', borderColor: 'color-mix(in srgb, var(--accent-2) 45%, transparent)' }}>
+            <Mic size={13} color="var(--accent-2)" />
+            <span style={{ fontSize: 11, fontWeight: 700 }}>LIVE STETHOSCOPE</span>
+            <span className="dim" style={{ fontSize: 10.5 }}>amplified mic → HP 350 / LP 2800 / notch 50–60 Hz → speakers. Use headphones to avoid feedback.</span>
+            <span className="mono" style={{ marginLeft: 'auto', fontSize: 9.5, color: 'var(--accent-2)' }}>{bandLevel.toFixed(0)} dBFS</span>
+          </div>
+        )}
+        {liveState === 'blocked' && (
+          <div className="dim" style={{ marginTop: 10, fontSize: 10.5 }}>Mic blocked — grant permission in the privileges drawer, or keep using the simulators.</div>
+        )}
         <div style={{ display: 'flex', gap: 18, marginTop: 14, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span className="label">Band limiting</span><Toggle on={restrictBand} onClick={() => setRestrictBand((v) => !v)} />
@@ -132,7 +202,7 @@ export default function HydroListen() {
                   className="glass"
                   role="button"
                   tabIndex={0}
-                  onClick={() => { setScenario(sc); if (active) stop(); else play(sc); }}
+                  onClick={() => { stopLive(); setScenario(sc); if (active) stop(); else play(sc); }}
                   style={{
                     padding: 14, cursor: 'pointer', display: 'flex', gap: 12, alignItems: 'center',
                     borderColor: active ? sc.color : undefined,
