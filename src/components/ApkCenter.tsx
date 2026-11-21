@@ -1,16 +1,19 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { QRCodeSVG } from 'qrcode.react';
 import { Check, Download, Package, ShieldCheck, Smartphone, Terminal, X } from 'lucide-react';
 import { useApp } from '../state/AppState';
-import { shortChecksum } from '../services/format';
+import { apkUrl, formatBytes, loadRelease, shortSha, type ApkRelease } from '../services/apkRelease';
 import { spring } from './ui';
 
-const APK_PATH = '/releases/sonostruct-release.apk';
+const APK_PATH = apkUrl;
 const APK_NAME = 'SonoStruct-NDT-v1.0.0.apk';
 
-/** Attempts the bundled artifact, falling back to a generated installer manifest stream. */
-async function triggerApkDownload(viaModal: boolean): Promise<'bundle' | 'fallback'> {
+/**
+ * Downloads the compiled APK. If the workflow has not published one yet we do
+ * NOT fake an installable file — we throw so the UI can say so plainly.
+ */
+async function triggerApkDownload(_viaModal: boolean): Promise<'bundle' | 'missing'> {
   const tryFetch = async (): Promise<boolean> => {
     try {
       const head = await fetch(APK_PATH, { method: 'HEAD', cache: 'no-store' });
@@ -26,40 +29,21 @@ async function triggerApkDownload(viaModal: boolean): Promise<'bundle' | 'fallba
     a.remove();
     return 'bundle';
   }
-  // Fallback: stream a signed manifest package so the action never 404s.
-  const manifest = [
-    'SONO-STRUCT APK DISTRIBUTION MANIFEST',
-    'package: com.sonostruct.ndt',
-    'versionName: 1.0.0',
-    'versionCode: 10000',
-    'abi: arm64-v8a, armeabi-v7a',
-    `issued: ${new Date().toISOString()}`,
-    `origin: ${window.location.origin}`,
-    viaModal ? 'channel: distribution-modal' : 'channel: header-quick-action',
-    '',
-    'The CUDA-free release APK is compiled by .github/workflows/build-and-bundle-apk.yml',
-    'and published to public/releases/sonostruct-release.apk. Install with:',
-    '  1. Settings → Apps → Special access → Install unknown apps',
-    '  2. Open the downloaded APK',
-    '  3. Allow install, then launch SonoStruct offline',
-  ].join('\n');
-  const blob = new Blob([manifest], { type: 'application/octet-stream' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = APK_NAME;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-  return 'fallback';
+  return 'missing';
 }
 
 export function ApkCenter() {
   const { apkOpen, setApkOpen, toast } = useApp();
   const [checking, setChecking] = useState(false);
-  const checksum = useMemo(() => shortChecksum(`sonostruct-1.0.0-${navigator.userAgent}`), []);
+  const [release, setRelease] = useState<ApkRelease | null>(null);
+  const [probed, setProbed] = useState(false);
   const installUrl = typeof window !== 'undefined' ? `${window.location.origin}${APK_PATH}` : APK_PATH;
+
+  useEffect(() => {
+    let alive = true;
+    void loadRelease().then((r) => { if (alive) { setRelease(r); setProbed(true); } });
+    return () => { alive = false; };
+  }, []);
 
   useEffect(() => {
     if (!apkOpen) return;
@@ -72,8 +56,14 @@ export function ApkCenter() {
     setChecking(true);
     const mode = await triggerApkDownload(true);
     setChecking(false);
-    toast(mode === 'bundle' ? 'Downloading SonoStruct-NDT-v1.0.0.apk…' : 'Bundled release not yet published — streamed the signed installer manifest instead.');
+    toast(
+      mode === 'bundle'
+        ? `Downloading ${APK_NAME} — verify SHA-256 after transfer.`
+        : 'No compiled APK is published yet. Run the "Build & Bundle APK" workflow, which commits a signed release APK here.',
+    );
   };
+
+  const sizeLabel = release ? formatBytes(release.sizeBytes) : null;
 
   return (
     <AnimatePresence>
@@ -109,15 +99,41 @@ export function ApkCenter() {
                   disabled={checking}
                   style={{ width: '100%', padding: '14px 18px', fontSize: 13.5, borderRadius: 14, boxShadow: '0 18px 50px -18px color-mix(in srgb, var(--accent) 85%, transparent)' }}
                 >
-                  <Download size={16} /> {checking ? 'Preparing package…' : 'Download Android .APK — 28.4 MB'}
+                  <Download size={16} />
+                  {checking
+                    ? 'Preparing package…'
+                    : probed && !release
+                      ? 'APK not built yet — run the build workflow'
+                      : `Download Android .APK${sizeLabel ? ` — ${sizeLabel}` : ''}`}
                 </button>
                 <div className="mono dim" style={{ fontSize: 9.5, marginTop: 8, wordBreak: 'break-all' }}>{APK_PATH} → {APK_NAME}</div>
+                {release && (
+                  <div style={{ display: 'grid', gap: 4, marginTop: 10 }}>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--text-dim)' }}>
+                      {release.entries} zip entries · {release.abi}
+                    </div>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--text-dim)', wordBreak: 'break-all' }}>
+                      sha256 {release.sha256}
+                    </div>
+                  </div>
+                )}
+                {probed && !release && (
+                  <div style={{ marginTop: 10, fontSize: 10.5, lineHeight: 1.5, color: 'var(--warn)' }}>
+                    No release manifest at <span className="mono">/releases/sonostruct-release.json</span>. The APK is compiled by CI
+                    (GitHub → Actions → “Build & Bundle APK”), which commits the signed artifact into <span className="mono">public/releases/</span>.
+                  </div>
+                )}
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 16 }}>
-                  <Badge icon={<Smartphone size={12} />} label="Version" value="v1.0.0-arm64" />
+                  <Badge icon={<Smartphone size={12} />} label="Version" value={release ? `v${release.version}` : 'v1.0.0 (pending)'} />
                   <Badge icon={<Check size={12} />} label="Offline ready" value="100% · IndexedDB" />
-                  <Badge icon={<ShieldCheck size={12} />} label="SHA-256" value={`${checksum}…`} mono />
-                  <Badge icon={<Package size={12} />} label="Engine" value="WebAudio + IMU" />
+                  <Badge
+                    icon={<ShieldCheck size={12} />}
+                    label="SHA-256"
+                    value={release ? shortSha(release.sha256) : 'not published'}
+                    mono
+                  />
+                  <Badge icon={<Package size={12} />} label={release ? 'Built' : 'Engine'} value={release ? new Date(release.builtAt).toLocaleDateString() : 'WebAudio + IMU'} />
                 </div>
 
                 <div style={{ marginTop: 18 }}>
