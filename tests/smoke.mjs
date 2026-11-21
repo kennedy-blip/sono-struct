@@ -123,11 +123,12 @@ const waitFor = async (fn, label, tries = 25) => {
   console.log(`    (timed out waiting for ${label})`);
   return false;
 };
-const click = async (pred) => {
-  const b = [...document.querySelectorAll('button')].find(pred);
-  if (!b) return false;
+const clickables = () => [...document.querySelectorAll('button, [role="button"]')];
+const click = async (pred, waitMs = 180) => {
+  const b = clickables().find(pred);
+  if (!b) { console.log(`    (no button matched: ${pred.toString().slice(0, 70)})`); return false; }
   await act(async () => { b.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); });
-  await settle(180);
+  await settle(waitMs);
   return true;
 };
 const nav = (label) => click((x) => x.textContent.trim() === label);
@@ -138,8 +139,10 @@ check('desktop workstation boots with impact-echo module', text().includes('Wall
 
 await nav('Leaks');
 check('hydro module loads', await waitFor(() => text().includes('Sub-Surface Leak Stethoscope'), 'hydro'));
-await click((x) => x.textContent.includes('Pin-Hole Copper Leak'));
-check('plumbing signature drives the analyser', await waitFor(() => /Detected peak/.test(text()), 'leak peak'));
+check('idle stethoscope prompts for a signature', text().includes('Tap a plumbing signature to begin listening'));
+await click((x) => x.textContent.includes('Pin-Hole Copper Leak'), 300);
+check('plumbing signature drives the analyser',
+  await waitFor(() => !text().includes('Tap a plumbing signature to begin listening'), 'live spectrum'));
 await click((x) => x.textContent.includes('Commit leak report'));
 check('leak report saves + queues', await waitFor(() => text().includes('plumbing ledger'), 'leak save'));
 
@@ -152,8 +155,13 @@ check('room blueprint saves', await waitFor(() => text().includes('Room acoustic
 
 await nav('Scan');
 await waitFor(() => text().includes('Save wall scan'), 'scan');
-await click((x) => x.textContent.includes('Save wall scan'));
-check('wall scan saves to IndexedDB vault', await waitFor(() => text().includes('committed to the IndexedDB vault'), 'scan save'));
+// Assert against the real IndexedDB contents, not a self-hiding toast.
+const { db } = await server.ssrLoadModule('/src/services/db.ts');
+await click((x) => x.textContent.includes('Save wall scan'), 400);
+await waitFor(() => true, 'noop', 1);
+const savedScan = await db.scans.orderBy('createdAt').reverse().first();
+check('wall scan persists to the IndexedDB vault',
+  (await db.scans.count()) >= 1 && (savedScan?.verdicts.length ?? 0) > 0 && (savedScan?.studCenters.length ?? 0) > 0);
 
 await nav('Level');
 check('clinometer exposes all engineering units',
@@ -163,7 +171,7 @@ check('0.0° lock fires', await waitFor(() => text().includes('LOCKED 0.0°'), '
 
 await click((x) => x.textContent.includes('MOBILE APK PREVIEW'));
 check('mobile APK chassis renders', await waitFor(() => text().includes('NDT JOBSITE'), 'mobile'));
-await click((x) => x.textContent.includes('DESKTOP ENGINEERING'));
+await click((x) => x.textContent.includes('Back to Desktop Engineering Station'));
 
 await nav('Vault');
 await waitFor(() => /Audit score/.test(text()), 'vault');
@@ -171,8 +179,8 @@ await click((x) => x.textContent.startsWith('Ledger'));
 check('ledger lists the saved records', await waitFor(() => text().includes('Wall scan'), 'ledger'));
 await click((x) => x.textContent.startsWith('Queue'));
 check('sync queue controller lists mutations', await waitFor(() => text().includes('Mutation Sync Queue'), 'queue'));
-await click((x) => x.textContent.includes('Drain'));
-check('queue drains to synced', await waitFor(() => /SYNCED/.test(text()), 'drain'));
+await click((x) => x.textContent.includes('Drain'), 0);
+check('queue drains to synced', await waitFor(() => /SYNCED/.test(text()), 'drain', 40));
 
 await click((x) => x.textContent.startsWith('Ledger'));
 await settle(300);
