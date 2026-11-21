@@ -1,24 +1,111 @@
 name: Build & Bundle APK
+
+# Compiles the Capacitor Android shell into a signed release APK and commits it
+# to public/releases/ so the web app's one-tap download serves a real artifact.
+#
+# Runs on GitHub's runners because they ship a JDK 17 + Android SDK toolchain;
+# the Vercel build only needs the committed APK.
+
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
+    paths:
+      - 'src/**'
+      - 'android/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/postbuild-apk.mjs'
+      - '.github/workflows/build-and-bundle-apk.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/setup-node@v4
-        with: { node-version: '20' }
-      - run: npm ci
-      - run: npm run build
-      - run: npx cap sync android
+        with:
+          node-version: '20'
+          cache: npm
+
       - uses: actions/setup-java@v4
-        with: { distribution: 'temurin', java-version: '17' }
-      - run: cd android && ./gradlew assembleRelease --no-daemon
-      - run: |
-          mkdir -p public/releases
-          cp android/app/build/outputs/apk/release/app-release.apk public/releases/sonostruct-release.apk
-          sha256sum public/releases/sonostruct-release.apk
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Sync Capacitor → Android
+        run: npx cap sync android
+
+      - name: Gradle cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+
+      - name: Assemble signed release APK
+        working-directory: android
+        env:
+          SONO_KEYSTORE_PASSWORD: sonostruct-release
+          SONO_KEY_ALIAS: sonostruct
+          SONO_KEY_PASSWORD: sonostruct-release
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify, hash and publish into public/releases
+        run: node scripts/postbuild-apk.mjs android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Verify signature (apksigner)
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          echo "using $APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs public/releases/sonostruct-release.apk
+
+      - name: Commit artifact
+        run: |
+          git config user.name  "sono-struct-apk-bot"
+          git config user.email "apk-bot@users.noreply.github.com"
+          git add public/releases/sonostruct-release.apk public/releases/sonostruct-release.json
+          if git diff --cached --quiet; then
+            echo "No APK change to commit."
+          else
+            SHA=$(node -p "require('./public/releases/sonostruct-release.json').sha256")
+            SIZE=$(node -p "(require('./public/releases/sonostruct-release.json').sizeBytes/1048576).toFixed(2)")
+            git commit -m "build(apk): signed release ${SIZE} MB [skip ci]
+
+            sha256: ${SHA}
+            built by .github/workflows/build-and-bundle-apk.yml from ${GITHUB_SHA}"
+            git push
+          fi
+
       - uses: actions/upload-artifact@v4
-        with: { name: sonostruct-apk, path: public/releases/sonostruct-release.apk }
+        with:
+          name: sonostruct-release-apk
+          path: |
+            public/releases/sonostruct-release.apk
+            public/releases/sonostruct-release.json
+          if-no-files-found: error
+          retention-days: 30

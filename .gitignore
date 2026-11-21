@@ -6,3 +6,8 @@ dist
 android/app/build
 android/.gradle
 tsconfig.tsbuildinfo
+android/.idea
+android/local.properties
+android/build
+android/capacitor-cordova-android-plugins/build
+*.apk.idsig

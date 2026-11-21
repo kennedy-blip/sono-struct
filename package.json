@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:smoke": "node tests/smoke.mjs"
+    "test:smoke": "node tests/smoke.mjs",
+    "apk:verify": "node scripts/postbuild-apk.mjs",
+    "apk:keystore": "python3 scripts/make-keystore.py"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.0",

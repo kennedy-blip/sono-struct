@@ -1,8 +1,18 @@
 # APK release artifacts
 
-`sonostruct-release.apk` is produced by `.github/workflows/build-and-bundle-apk.yml`
-(Gradle `assembleRelease` after `npx cap sync android`) and committed / uploaded here.
+`sonostruct-release.apk` and its `sonostruct-release.json` manifest are produced
+by `.github/workflows/build-and-bundle-apk.yml`:
 
-The in-app APK Download Center probes this file with a `HEAD` request; when it is
-missing or too small it falls back to streaming a signed installer manifest so the
-one-tap download never 404s.
+```
+npm run build            # web bundle
+npx cap sync android     # copy into the Capacitor shell
+./gradlew assembleRelease  # signed with android/keystore/sonostruct-release.p12
+node scripts/postbuild-apk.mjs <apk>   # verify + hash + publish here
+```
+
+The workflow then commits both files back to `main`, so the Vercel deployment
+serves a real APK from the app's one-tap download button.
+
+The app reads `sonostruct-release.json` for the true size, SHA-256 and build
+date. If the manifest is absent the APK Center says so explicitly instead of
+handing out a fake file.
