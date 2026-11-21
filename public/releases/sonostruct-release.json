@@ -3,8 +3,8 @@
   "package": "com.sonostruct.ndt",
   "version": "1.0.0",
   "abi": "universal (no native libs; pure Java/Kotlin shell)",
-  "sizeBytes": 6012947,
-  "sha256": "229db8e3c784056055e7b665d56c2f371cff907bc2526bf124b3ca5b52e7268b",
-  "builtAt": "2026-11-21T13:50:29.491Z",
+  "sizeBytes": 8862050,
+  "sha256": "e9115bc3e32c5a3a36d4cbf89023675a2b015095d0c492deea04508e76e2cea6",
+  "builtAt": "2026-11-21T13:53:39.085Z",
   "entries": 469
 }
