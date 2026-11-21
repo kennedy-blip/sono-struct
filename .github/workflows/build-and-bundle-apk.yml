@@ -28,8 +28,13 @@ concurrency:
 
 jobs:
   build-apk:
-    runs-on: ubuntu-latest
+    # Pinned: GitHub's ubuntu images ship a preinstalled Android SDK, which is
+    # more reliable here than bootstrapping commandline-tools over the network.
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
         with:
@@ -45,8 +50,37 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Ensure Android SDK packages
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::No Android SDK at $SDK"
+            ls -la /usr/local/lib/android || true
+            exit 1
+          fi
+          echo "SDK root: $SDK"
+          ls "$SDK"
+          SDKMGR="$(command -v sdkmanager || true)"
+          if [ -z "$SDKMGR" ] && [ -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMGR="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "sdkmanager: ${SDKMGR:-<none>}"
+          if [ -n "$SDKMGR" ]; then
+            yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+            "$SDKMGR" --install "platforms;android-34" "build-tools;34.0.0" >/dev/null 2>&1 || true
+          fi
+          echo "--- installed platforms:"; ls "$SDK/platforms" || true
+          echo "--- installed build-tools:"; ls "$SDK/build-tools" || true
+          test -d "$SDK/platforms/android-34" || { echo "::error::platforms;android-34 missing"; exit 1; }
+
+      - name: Resolve build-tools version
+        id: bt
+        run: |
+          SDK="${ANDROID_SDK_ROOT}"
+          BT="$(ls "$SDK/build-tools" | sort -V | tail -1)"
+          echo "version=$BT" >> "$GITHUB_OUTPUT"
+          echo "Using build-tools $BT"
 
       - name: Install dependencies
         run: npm ci
@@ -80,7 +114,8 @@ jobs:
 
       - name: Verify signature (apksigner)
         run: |
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          set -euo pipefail
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/${{ steps.bt.outputs.version }}/apksigner"
           echo "using $APKSIGNER"
           "$APKSIGNER" verify --verbose --print-certs public/releases/sonostruct-release.apk
 
