@@ -44,8 +44,16 @@ function StatusStrip() {
       <span className="mono" style={{ color: online ? 'var(--accent-2)' : 'var(--warn)' }}>{online ? '● ONLINE' : '● OFFLINE-FIRST'}</span>
       <span className="mono dim">sensors {active}/4 active</span>
       <span className="mono dim">queue {counts.pending}</span>
-      <span className="mono dim" title={cloud.configured ? 'Supabase cloud ledger' : 'local IndexedDB only'}>
-        sync {cloud.configured ? (cloud.reachable ? 'cloud ✓' : 'cloud ✕') : 'local'}
+      <span
+        className="mono dim"
+        title={
+          cloud.phase === 'local' ? 'Local IndexedDB only — add Supabase keys to enable cloud sync'
+            : cloud.phase === 'checking' ? 'Probing the Supabase ledger…'
+              : cloud.phase === 'ok' ? `Supabase ledger reachable · ${cloud.remoteRows} rows on this device`
+                : `Supabase unreachable${cloud.error ? `: ${cloud.error}` : ''} — queue still works locally`
+        }
+      >
+        sync {cloud.phase === 'local' ? 'local' : cloud.phase === 'checking' ? 'cloud …' : cloud.phase === 'ok' ? 'cloud ✓' : 'cloud ✕'}
       </span>
       <span className="mono dim">vault {counts.scans + counts.leaks + counts.rooms} records</span>
       <button className="btn" onClick={() => void syncNow()} disabled={syncing} style={{ marginLeft: 'auto', padding: '4px 9px', fontSize: 10 }}>

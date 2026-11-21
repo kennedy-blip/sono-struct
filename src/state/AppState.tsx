@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { ModuleId, Role, SensorKey, SensorState, ThemeId, ViewMode } from '../types';
 import { drainQueue, pendingCount, vaultCounts } from '../services/db';
 import { cloudEnabled, cloudStatus, type CloudStatus } from '../services/cloudSync';
+export type CloudPhase = 'checking' | 'ok' | 'error' | 'local';
 
 export interface VaultCounts { scans: number; leaks: number; rooms: number; checks: number; pending: number }
 
@@ -24,7 +25,7 @@ interface AppCtx {
   refreshCounts: () => Promise<void>;
   syncNow: () => Promise<{ synced: number; total: number }>;
   syncing: boolean;
-  cloud: CloudStatus & { configured: boolean };
+  cloud: CloudStatus & { configured: boolean; phase: CloudPhase };
   apkOpen: boolean;
   setApkOpen: (v: boolean) => void;
   privOpen: boolean;
@@ -63,7 +64,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [online, setOnline] = useState(navigator.onLine);
   const [counts, setCounts] = useState<VaultCounts>({ scans: 0, leaks: 0, rooms: 0, checks: 0, pending: 0 });
   const [syncing, setSyncing] = useState(false);
-  const [cloud, setCloud] = useState<CloudStatus & { configured: boolean }>({ configured: cloudEnabled(), reachable: false, remoteRows: 0, lastSyncedAt: null });
+  const [cloud, setCloud] = useState<CloudStatus & { configured: boolean; phase: CloudPhase }>(() => ({
+    configured: cloudEnabled(), reachable: false, remoteRows: 0, lastSyncedAt: null,
+    phase: cloudEnabled() ? 'checking' : 'local',
+  }));
   const [apkOpen, setApkOpen] = useState(false);
   const [privOpen, setPrivOpen] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -99,7 +103,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await refreshCounts();
     if (cloudEnabled() && navigator.onLine) {
       const status = await cloudStatus();
-      setCloud({ configured: true, ...status });
+      setCloud({ configured: true, ...status, phase: status.reachable ? 'ok' : 'error' });
     }
     setSyncing(false);
     if (!navigator.onLine) setToastMsg('Offline — mutations held in the local queue.');
@@ -125,11 +129,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // before the user ever presses "Sync queue".
   const probeCloud = useCallback(async () => {
     if (!cloudEnabled()) {
-      setCloud({ configured: false, reachable: false, remoteRows: 0, lastSyncedAt: null });
+      setCloud({ configured: false, reachable: false, remoteRows: 0, lastSyncedAt: null, phase: 'local' });
       return;
     }
     const status = await cloudStatus();
-    setCloud({ configured: true, ...status });
+    setCloud({ configured: true, ...status, phase: status.reachable ? 'ok' : 'error' });
   }, []);
 
   useEffect(() => { void probeCloud(); }, [probeCloud]);
