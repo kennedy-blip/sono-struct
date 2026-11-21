@@ -55,6 +55,10 @@ try {
   process.exit(1);
 }
 
+// 64-bit libs ship where present; the Capacitor shell has no native code of its
+// own, so "no lib/ ABIs" is valid and reported as such rather than guessed.
+const abis = [...new Set(names.filter((n) => n.startsWith('lib/')).map((n) => n.split('/')[1]))];
+
 const required = ['AndroidManifest.xml', 'classes.dex'];
 const missing = required.filter((r) => !names.includes(r));
 if (missing.length) {
@@ -76,7 +80,7 @@ const meta = {
   app: 'SONO-STRUCT',
   package: 'com.sonostruct.ndt',
   version: '1.0.0',
-  abi: 'arm64-v8a + armeabi-v7a (universal)',
+  abi: abis.length ? abis.join(' + ') : 'universal (no native libs; pure Java/Kotlin shell)',
   sizeBytes: statSync(outApk).size,
   sha256,
   builtAt: new Date().toISOString(),
@@ -85,6 +89,7 @@ const meta = {
 writeFileSync(resolve(outDir, 'sonostruct-release.json'), `${JSON.stringify(meta, null, 2)}\n`);
 
 console.log(`✓ verified APK (${names.length} entries, ${(meta.sizeBytes / 1048576).toFixed(2)} MB)`);
+console.log(`  abi    ${meta.abi}`);
 console.log(`  sha256 ${sha256}`);
 console.log(`  → ${outApk}`);
 console.log(`  manifest ${dirname(outApk)}/sonostruct-release.json`);

@@ -107,6 +107,16 @@ export function ApkCenter() {
                       : `Download Android .APK${sizeLabel ? ` — ${sizeLabel}` : ''}`}
                 </button>
                 <div className="mono dim" style={{ fontSize: 9.5, marginTop: 8, wordBreak: 'break-all' }}>{APK_PATH} → {APK_NAME}</div>
+                {release && (
+                  <div style={{ display: 'grid', gap: 4, marginTop: 10 }}>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--text-dim)' }}>
+                      {release.entries} zip entries · {release.abi}
+                    </div>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--text-dim)', wordBreak: 'break-all' }}>
+                      sha256 {release.sha256}
+                    </div>
+                  </div>
+                )}
                 {probed && !release && (
                   <div style={{ marginTop: 10, fontSize: 10.5, lineHeight: 1.5, color: 'var(--warn)' }}>
                     No release manifest at <span className="mono">/releases/sonostruct-release.json</span>. The APK is compiled by CI

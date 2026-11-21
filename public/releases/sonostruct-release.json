@@ -2,9 +2,9 @@
   "app": "SONO-STRUCT",
   "package": "com.sonostruct.ndt",
   "version": "1.0.0",
-  "abi": "arm64-v8a + armeabi-v7a (universal)",
+  "abi": "universal (no native libs; pure Java/Kotlin shell)",
   "sizeBytes": 6012947,
   "sha256": "229db8e3c784056055e7b665d56c2f371cff907bc2526bf124b3ca5b52e7268b",
-  "builtAt": "2026-11-21T13:48:38.041Z",
+  "builtAt": "2026-11-21T13:50:29.491Z",
   "entries": 469
 }
