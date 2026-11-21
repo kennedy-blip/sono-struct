@@ -60,6 +60,17 @@ try {
 const abis = [...new Set(names.filter((n) => n.startsWith('lib/')).map((n) => n.split('/')[1]))];
 
 const required = ['AndroidManifest.xml', 'classes.dex'];
+
+// Guard against self-nesting: `dist/` contains public/releases, so a plain
+// `cap sync` would copy the previous APK into the new one. scripts/sync-android.mjs
+// prevents that; fail loudly if it ever slips through.
+const nested = names.filter((n) => n.startsWith('assets/public/releases/') && /\.(apk|aab)$/i.test(n));
+if (nested.length) {
+  console.error('✗ APK contains a nested build artifact:');
+  for (const n of nested) console.error(`    ${n}`);
+  console.error('  Run `npm run cap:sync` (scripts/sync-android.mjs) instead of a bare `npx cap sync android`.');
+  process.exit(1);
+}
 const missing = required.filter((r) => !names.includes(r));
 if (missing.length) {
   console.error(`APK missing required entries: ${missing.join(', ')}`);

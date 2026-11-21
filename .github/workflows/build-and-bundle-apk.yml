@@ -89,7 +89,9 @@ jobs:
         run: npm run build
 
       - name: Sync Capacitor → Android
-        run: npx cap sync android
+        # Not a bare `cap sync`: that would embed public/releases/*.apk into the
+        # APK being built. See scripts/sync-android.mjs.
+        run: npm run cap:sync
 
       - name: Gradle cache
         uses: actions/cache@v4
@@ -123,7 +125,11 @@ jobs:
         run: |
           git config user.name  "sono-struct-apk-bot"
           git config user.email "apk-bot@users.noreply.github.com"
+          # Stage the synced web bundle too, so a regenerated dist cannot leave a
+          # stale (or previously nested) copy of the artifact sitting in
+          # android/app/src/main/assets/public/releases/.
           git add public/releases/sonostruct-release.apk public/releases/sonostruct-release.json
+          git add -A android/app/src/main/assets
           if git diff --cached --quiet; then
             echo "No APK change to commit."
           else
